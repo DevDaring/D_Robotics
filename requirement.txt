@@ -10,4 +10,4 @@ notebook
 --index-url http://archive.d-robotics.cc/simple/
 --trusted-host archive.d-robotics.cc
 
-bpu_infer_lib_x5
+#bpu_infer_lib_x5
