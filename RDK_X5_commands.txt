@@ -1,0 +1,13 @@
+
+sunrise@ubuntu:~$ hostname -I
+ssh sunrise@192.168.0.117 on VS code
+
+
+# 1) Go to the folder where the script is
+cd ~/rdk_model_zoo/demos/OCR/PaddleOCR
+
+# 2) Activate venv (optional if already active)
+source ~/venv_ocr/bin/activate
+
+# 3) Run with clean library env (this avoids the /usr/hobot/lib conflict)
+env -u LD_LIBRARY_PATH -u LD_PRELOAD DISABLE_MODEL_SOURCE_CHECK=True python3 cpu_paddle_ocr.py --image_path data/paddleocr_test.jpg --output_folder output/predict.jpg
