@@ -1,0 +1,34 @@
+
+sunrise@ubuntu:~$ hostname -I
+ssh sunrise@192.168.0.117 on VS code
+
+
+# 1) Go to the folder where the script is
+cd ~/rdk_model_zoo/demos/OCR/PaddleOCR
+
+# 2) Activate venv (optional if already active)
+source ~/venv_ocr/bin/activate
+
+# 3) Run with clean library env (this avoids the /usr/hobot/lib conflict)
+env -u LD_LIBRARY_PATH -u LD_PRELOAD DISABLE_MODEL_SOURCE_CHECK=True python3 cpu_paddle_ocr.py --image_path data/paddleocr_test.jpg --output_folder output/predict.jpg
+
+# 4) Run mic and speaker
+cd ~/rdk_model_zoo/demos/OCR/PaddleOCR   # or any folder where you saved the script
+source ~/venv_ocr/bin/activate
+env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 jabra_record_play.py
+
+# 5) Run Camera
+#Terminal A (camera publisher)
+
+source /opt/tros/humble/setup.bash
+export ROS_LOCALHOST_ONLY=1
+ros2 daemon stop
+ros2 launch mipi_cam mipi_cam_dual_channel.launch.py
+#Terminal B (snapshot)
+
+source /opt/tros/humble/setup.bash
+export ROS_LOCALHOST_ONLY=1
+source ~/venv_ocr/bin/activate
+
+python3 /home/sunrise/rdk_model_zoo/demos/OCR/PaddleOCR/camera_snapshot_once.py
+ls -ltr /home/sunrise/rdk_model_zoo/demos/OCR/PaddleOCR/output | tail
