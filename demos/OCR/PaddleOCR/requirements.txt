@@ -98,3 +98,16 @@ urllib3==2.6.2
 visualdl==2.5.3
 wcwidth==0.2.14
 Werkzeug==3.1.4
+
+# ============================================================
+# Care Giver - Additional Dependencies
+# ============================================================
+# Google Generative AI (Gemini) - for AI responses
+google-generativeai>=0.3.0
+
+# Google Cloud TTS/STT - for voice input/output
+google-cloud-texttospeech>=2.14.0
+google-cloud-speech>=2.21.0
+
+# Environment variable loading
+python-dotenv>=1.0.0
