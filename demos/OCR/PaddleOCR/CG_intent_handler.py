@@ -76,15 +76,43 @@ def detect_intent(text: str) -> Tuple[Intent, float]:
     if not normalized:
         return Intent.UNKNOWN, 0.0
     
-    # Check for capture intent (highest priority when expected)
-    for keyword in CAPTURE_KEYWORDS:
-        if keyword in normalized:
-            return Intent.CAPTURE_IMAGE, 0.95
-    
-    # Check for exit intent
+    # Check for exit intent FIRST (safety)
     for keyword in EXIT_KEYWORDS:
         if keyword in normalized:
             return Intent.EXIT, 0.9
+    
+    # Check for capture intent - EXPANDED DETECTION
+    # This is the most important intent for the healthcare assistant
+    capture_detected = False
+    
+    # Method 1: Check exact keywords
+    for keyword in CAPTURE_KEYWORDS:
+        if keyword in normalized:
+            capture_detected = True
+            break
+    
+    # Method 2: Check for prescription/document + action words
+    if not capture_detected:
+        doc_words = ["prescription", "medicine", "report", "document", "paper", "label"]
+        action_words = ["read", "scan", "show", "see", "check", "take", "capture", "look", "view"]
+        
+        has_doc = any(word in normalized for word in doc_words)
+        has_action = any(word in normalized for word in action_words)
+        
+        if has_doc and has_action:
+            capture_detected = True
+        elif has_doc:  # Just saying "prescription" alone might mean capture
+            capture_detected = True
+    
+    # Method 3: Check for camera-related words
+    if not capture_detected:
+        camera_words = ["camera", "photo", "picture", "image", "pic", "snap", "capture"]
+        if any(word in normalized for word in camera_words):
+            capture_detected = True
+    
+    if capture_detected:
+        print(f"[INTENT] 📸 Capture intent detected: '{text}'")
+        return Intent.CAPTURE_IMAGE, 0.95
     
     # Check for confirm/deny (context-dependent)
     for keyword in CONFIRM_KEYWORDS:

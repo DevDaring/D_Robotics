@@ -52,10 +52,13 @@ def _discover_jabra_device() -> str:
     """
     Auto-discover Jabra USB microphone device.
     
+    IMPORTANT: Jabra is typically on card 1 (USB), card 0 is usually built-in.
+    Only override if we explicitly find Jabra on a different card.
+    
     Returns:
-        ALSA device string (e.g., 'plughw:1,0') or default 'plughw:1,0'
+        ALSA device string (e.g., 'plughw:1,0') - defaults to card 1
     """
-    default_device = "plughw:1,0"  # Use plughw instead of hw to avoid PulseAudio conflicts
+    default_device = "plughw:1,0"  # Jabra USB is typically card 1
     
     try:
         result = subprocess.run(
@@ -63,22 +66,40 @@ def _discover_jabra_device() -> str:
             capture_output=True, text=True, timeout=5
         )
         
-        # Look for Jabra in the output
-        for line in result.stdout.split('\n'):
-            if "Jabra" in line:
+        output = result.stdout
+        print(f"[AUDIO] Available capture devices:\n{output.strip()}")
+        
+        # Look for Jabra specifically
+        for line in output.split('\n'):
+            line_lower = line.lower()
+            if "jabra" in line_lower:
                 # Extract card number: "card 1: Jabra [...]"
                 import re
                 match = re.search(r'card\s+(\d+)', line)
                 if match:
                     card_num = match.group(1)
-                    return f"plughw:{card_num},0"
+                    device = f"plughw:{card_num},0"
+                    print(f"[AUDIO] Found Jabra on card {card_num}")
+                    return device
         
-        # If no Jabra found but we have cards, use card 1 (USB typically)
-        if "card 1:" in result.stdout:
+        # If no Jabra found, check for USB audio (usually card 1)
+        for line in output.split('\n'):
+            line_lower = line.lower()
+            if "usb" in line_lower and "card 1" in line_lower:
+                print(f"[AUDIO] Using USB audio on card 1")
+                return "plughw:1,0"
+        
+        # Check if card 1 exists at all
+        if "card 1:" in output:
+            print(f"[AUDIO] Using card 1 (USB typically)")
             return "plughw:1,0"
+        
+        # Last resort: use card 0
+        print(f"[AUDIO] ⚠️ No Jabra/USB found, using card 0")
+        return "plughw:0,0"
             
-    except:
-        pass
+    except Exception as e:
+        print(f"[AUDIO] ⚠️ Discovery error: {e}, using default")
     
     return default_device
 
@@ -433,18 +454,37 @@ def text_to_speech(
     sample_rate: int = 16000
 ) -> bool:
     """
-    Convert text to speech using Google Cloud TTS.
+    Convert text to speech.
+    
+    Tries Google Cloud TTS first, falls back to gTTS (free) if credentials not available.
     
     Args:
         text: Text to convert to speech
         output_path: Output WAV file path
         language_code: Language code
-        voice_name: Voice name
+        voice_name: Voice name (for Google Cloud TTS)
         sample_rate: Output sample rate
         
     Returns:
         True if successful
     """
+    # Try Google Cloud TTS first
+    if _try_google_cloud_tts(text, output_path, language_code, voice_name, sample_rate):
+        return True
+    
+    # Fallback to gTTS (free, no credentials needed)
+    print("[TTS] Trying gTTS fallback...")
+    return _try_gtts(text, output_path)
+
+
+def _try_google_cloud_tts(
+    text: str,
+    output_path: str,
+    language_code: str,
+    voice_name: str,
+    sample_rate: int
+) -> bool:
+    """Try Google Cloud TTS (requires credentials)."""
     try:
         from google.cloud import texttospeech
         
@@ -481,11 +521,69 @@ def text_to_speech(
         with open(output_path, "wb") as f:
             f.write(response.audio_content)
         
-        print(f"[TTS] ✅ Generated: {output_path}")
+        print(f"[TTS] ✅ Generated (Google Cloud): {output_path}")
         return True
         
     except Exception as e:
-        print(f"[TTS] ❌ Error: {e}")
+        error_msg = str(e)
+        if "credentials" in error_msg.lower():
+            print(f"[TTS] ⚠️ Google Cloud credentials not configured")
+        else:
+            print(f"[TTS] ⚠️ Google Cloud TTS error: {e}")
+        return False
+
+
+def _try_gtts(text: str, output_path: str) -> bool:
+    """
+    Fallback TTS using gTTS (Google Text-to-Speech - free, no credentials).
+    
+    Note: gTTS outputs MP3, we need to convert to WAV for consistency.
+    """
+    try:
+        from gtts import gTTS
+        import tempfile
+        
+        # Ensure directory exists
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        # Generate speech (gTTS outputs MP3)
+        tts = gTTS(text=text, lang='en', slow=False)
+        
+        # Save as MP3 first
+        mp3_path = output_path.replace('.wav', '.mp3')
+        if mp3_path == output_path:
+            mp3_path = output_path + '.mp3'
+        
+        tts.save(mp3_path)
+        
+        # Convert MP3 to WAV using ffmpeg or direct play
+        # Try ffmpeg first
+        try:
+            cmd = ["ffmpeg", "-y", "-i", mp3_path, "-ar", "16000", "-ac", "1", output_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                os.remove(mp3_path)  # Clean up MP3
+                print(f"[TTS] ✅ Generated (gTTS): {output_path}")
+                return True
+        except:
+            pass
+        
+        # If ffmpeg fails, just use MP3 directly (paplay can handle it)
+        if os.path.exists(mp3_path):
+            # Rename to output path (it's MP3 but should still play)
+            if output_path != mp3_path:
+                import shutil
+                shutil.move(mp3_path, output_path)
+            print(f"[TTS] ✅ Generated (gTTS/MP3): {output_path}")
+            return True
+        
+        return False
+        
+    except ImportError:
+        print("[TTS] ❌ gTTS not installed. Install with: pip install gTTS")
+        return False
+    except Exception as e:
+        print(f"[TTS] ❌ gTTS error: {e}")
         return False
 
 
@@ -495,9 +593,9 @@ def speech_to_text(
     sample_rate: int = 16000
 ) -> Tuple[str, float]:
     """
-    Convert speech to text using Google Cloud STT.
+    Convert speech to text.
     
-    Includes speech context boost for wake word "Kelvin".
+    Tries Google Cloud STT first, falls back to SpeechRecognition library.
     
     Args:
         audio_path: Path to WAV audio file
@@ -507,6 +605,22 @@ def speech_to_text(
     Returns:
         Tuple of (transcribed_text, confidence)
     """
+    # Try Google Cloud STT first
+    result = _try_google_cloud_stt(audio_path, language_code, sample_rate)
+    if result[0]:  # If we got text
+        return result
+    
+    # Fallback to SpeechRecognition library (free Google API)
+    print("[STT] Trying SpeechRecognition fallback...")
+    return _try_speech_recognition(audio_path)
+
+
+def _try_google_cloud_stt(
+    audio_path: str,
+    language_code: str,
+    sample_rate: int
+) -> Tuple[str, float]:
+    """Try Google Cloud STT (requires credentials)."""
     try:
         from google.cloud import speech
         
@@ -548,14 +662,54 @@ def speech_to_text(
         transcript = transcript.strip()
         
         if transcript:
-            print(f"[STT] ✅ Heard: '{transcript}' (confidence: {confidence:.2%})")
+            print(f"[STT] ✅ Heard (Google Cloud): '{transcript}' (confidence: {confidence:.2%})")
         else:
             print("[STT] ⚠️ No speech detected")
         
         return transcript, confidence
         
     except Exception as e:
-        print(f"[STT] ❌ Error: {e}")
+        error_msg = str(e)
+        if "credentials" in error_msg.lower():
+            print(f"[STT] ⚠️ Google Cloud credentials not configured")
+        else:
+            print(f"[STT] ⚠️ Google Cloud STT error: {e}")
+        return "", 0.0
+
+
+def _try_speech_recognition(audio_path: str) -> Tuple[str, float]:
+    """
+    Fallback STT using SpeechRecognition library with Google's free API.
+    
+    This uses Google's free speech recognition (not Cloud API - no credentials needed).
+    Has daily usage limits but works for personal use.
+    """
+    try:
+        import speech_recognition as sr
+        
+        recognizer = sr.Recognizer()
+        
+        # Load audio file
+        with sr.AudioFile(audio_path) as source:
+            audio = recognizer.record(source)
+        
+        # Try Google's free API first
+        try:
+            transcript = recognizer.recognize_google(audio)
+            print(f"[STT] ✅ Heard (SpeechRecognition): '{transcript}'")
+            return transcript, 0.85  # Estimated confidence
+        except sr.UnknownValueError:
+            print("[STT] ⚠️ Could not understand audio")
+            return "", 0.0
+        except sr.RequestError as e:
+            print(f"[STT] ⚠️ Google free API error: {e}")
+            return "", 0.0
+            
+    except ImportError:
+        print("[STT] ❌ SpeechRecognition not installed. Install with: pip install SpeechRecognition")
+        return "", 0.0
+    except Exception as e:
+        print(f"[STT] ❌ SpeechRecognition error: {e}")
         return "", 0.0
 
 

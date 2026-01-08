@@ -31,8 +31,11 @@ cd ~/rdk_model_zoo/demos/OCR/PaddleOCR
 # Activate virtual environment
 source ~/venv_ocr/bin/activate
 
-# Install new dependencies
-pip install google-generativeai google-cloud-texttospeech google-cloud-speech python-dotenv
+# Install dependencies (with fallback TTS/STT - no Google Cloud credentials needed)
+pip install google-generativeai python-dotenv gTTS SpeechRecognition
+
+# Optional: Install Google Cloud TTS/STT (requires service account credentials)
+# pip install google-cloud-texttospeech google-cloud-speech
 ```
 
 ### 2. Configure API Keys
@@ -48,6 +51,12 @@ nano .env
 Add your Gemini API key:
 ```
 GEMINI_API_KEY=your_actual_api_key_here
+```
+
+**Note**: The system uses **gTTS** and **SpeechRecognition** by default (free, no credentials).
+If you want higher quality Google Cloud TTS/STT, set up a service account:
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your-service-account.json"
 ```
 
 ### 3. Start Camera (Terminal 1)

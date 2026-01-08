@@ -107,10 +107,34 @@ GEMINI_MAX_TOKENS = 256  # Keep responses brief (1-3 lines)
 # INTENT KEYWORDS
 # ============================================================
 # Keywords for triggering photo capture
+# IMPORTANT: Keep this list comprehensive - users say many different things!
 CAPTURE_KEYWORDS = [
+    # Direct capture commands
     "take picture", "take image", "take photo", "capture",
     "take a picture", "take an image", "take a photo",
-    "click photo", "click picture", "snap", "photograph"
+    "click photo", "click picture", "snap", "photograph",
+    "take pic", "click pic", "capture image",
+    # "Look at" phrases - very natural way to ask!
+    "look at the prescription", "look at prescription",
+    "look at the report", "look at report",
+    "look at the medicine", "look at medicine",
+    "look at this", "look at that", "look at it",
+    "look here", "see this", "see that",
+    # Prescription-related (most common use case!)
+    "read prescription", "read my prescription", "scan prescription",
+    "show prescription", "see prescription", "check prescription",
+    "read this", "read that", "read it", "scan this", "scan it",
+    "read the prescription", "scan the prescription",
+    "prescription", "medicine paper", "medical report",
+    # Document reading
+    "read document", "read paper", "read this paper",
+    "scan document", "scan paper", "scan this document",
+    "read report", "scan report", "medical document",
+    # Camera/photo triggers
+    "open camera", "use camera", "camera please",
+    "photo please", "picture please", "image please",
+    # Short forms
+    "pic", "photo", "image", "scan", "read",
 ]
 
 # Keywords for confirming actions

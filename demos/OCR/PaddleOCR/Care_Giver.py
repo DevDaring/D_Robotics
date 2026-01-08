@@ -303,13 +303,15 @@ class CareGiver:
         
         intent, confidence = detect_intent(command)
         
+        print(f"[INTENT] Detected: {intent.name} (confidence: {confidence:.0%})")
+        
         # EXIT intent
         if intent == Intent.EXIT:
             self.state = "exit"
             from CG_config import FAREWELL_MESSAGE
             return FAREWELL_MESSAGE, False
         
-        # CAPTURE intent - ask for confirmation
+        # CAPTURE intent - ALWAYS ask for confirmation before capturing
         if intent == Intent.CAPTURE_IMAGE:
             self.state = "awaiting_confirmation"
             self.pending_action = "capture"
