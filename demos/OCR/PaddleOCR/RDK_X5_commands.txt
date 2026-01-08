@@ -32,3 +32,16 @@ source ~/venv_ocr/bin/activate
 
 python3 /home/sunrise/rdk_model_zoo/demos/OCR/PaddleOCR/camera_snapshot_once.py
 ls -ltr /home/sunrise/rdk_model_zoo/demos/OCR/PaddleOCR/output | tail
+
+#6) Run project
+#Step 1: Start Camera (Terminal 1)
+source /opt/tros/humble/setup.bash
+export ROS_LOCALHOST_ONLY=1
+ros2 daemon stop
+ros2 launch mipi_cam mipi_cam_dual_channel.launch.py
+
+#Step 4: Run Care Giver (Terminal 2)
+cd ~/rdk_model_zoo/demos/OCR/PaddleOCR
+source ~/venv_ocr/bin/activate
+env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 Care_Giver.py
+

@@ -41,9 +41,11 @@ TEMP_DIR.mkdir(exist_ok=True)
 # ============================================================
 # AUDIO CONFIGURATION
 # ============================================================
-# Jabra USB device (card 1, device 0 based on RDK_X5_commands.txt)
+# INPUT: Jabra USB microphone (card 1, device 0)
 JABRA_CAPTURE_DEV = "hw:1,0"
 JABRA_PLAYBACK_DEV = "plughw:1,0"
+
+# OUTPUT: Bose Bluetooth speaker (PRIMARY)
 BOSE_SINK = os.getenv("BOSE_SINK", "bluez_sink.78_2B_64_DD_68_CF.a2dp_sink")
 
 # Audio format settings
@@ -51,10 +53,18 @@ AUDIO_SAMPLE_RATE = 16000
 AUDIO_CHANNELS = 1
 AUDIO_FORMAT = "S16_LE"
 DEFAULT_RECORD_DURATION = 7  # seconds for voice input
+WAKE_WORD_LISTEN_DURATION = 5  # seconds for wake word detection
 
 # Temp audio files
 TEMP_AUDIO_INPUT = TEMP_DIR / "voice_input.wav"
 TEMP_AUDIO_OUTPUT = TEMP_DIR / "voice_output.wav"
+
+# ============================================================
+# WAKE WORD CONFIGURATION
+# ============================================================
+WAKE_WORD = "kelvin"
+WAKE_WORD_VARIATIONS = ["kelvin", "calvin", "kevin", "kelven"]  # Common STT misrecognitions
+ASSISTANT_NAME = "Kelvin"
 
 # ============================================================
 # TTS CONFIGURATION
@@ -117,28 +127,32 @@ EXIT_KEYWORDS = ["exit", "quit", "bye", "goodbye", "stop", "end", "close"]
 # ============================================================
 # CONVERSATION PROMPTS
 # ============================================================
-GREETING_MESSAGE = "Hello! I am Care Giver, your healthcare assistant. How are you feeling today?"
+GREETING_MESSAGE = "Hello! I am Kelvin, your healthcare assistant. Say Hey Kelvin followed by your question or command. How are you feeling today?"
 
-HEALTH_FOLLOWUP = "I understand. Can you please show me your prescription or clinical report? Say 'take picture' when ready."
+HEALTH_FOLLOWUP = "I understand. Can you please show me your prescription or clinical report? Say Hey Kelvin take picture when ready."
 
-PRESCRIPTION_PROMPT = "Please hold the prescription or report in front of the camera. Say 'take picture' or 'capture' when you're ready."
+PRESCRIPTION_PROMPT = "Please hold the prescription or report in front of the camera. Say Hey Kelvin take picture when you're ready."
 
-CONFIRM_CAPTURE = "I'm ready to capture the image. Please confirm by saying 'yes' to proceed."
+CONFIRM_CAPTURE = "I'm ready to capture the image. Say yes to proceed or no to cancel."
 
 CAPTURE_SUCCESS = "Image captured successfully. Let me read the document for you."
 
 OCR_ANALYZING = "Analyzing the document. Please wait a moment."
 
-ALARM_PROMPT = "I found medicine information in your prescription. Would you like me to set reminders for your medicines?"
+ALARM_PROMPT = "I found medicine information in your prescription. Would you like me to set reminders for your medicines? Say yes or no."
 
 ALARM_SET_SUCCESS = "Alarm has been set successfully. I will remind you when it's time to take your medicine."
 
 FAREWELL_MESSAGE = "Take care of yourself! Remember to take your medicines on time. Goodbye!"
 
+WAKE_WORD_HINT = "Say Hey Kelvin to talk to me."
+
+NO_WAKE_WORD_MESSAGE = "I'm listening for Hey Kelvin. Please start your command with Hey Kelvin."
+
 # ============================================================
 # SYSTEM PROMPT FOR GEMINI
 # ============================================================
-CAREGIVER_SYSTEM_PROMPT = """You are Care Giver, a friendly and professional healthcare assistant.
+CAREGIVER_SYSTEM_PROMPT = """You are Kelvin, a friendly and professional healthcare assistant.
 Your role is to help elderly patients understand their prescriptions and medical reports.
 
 IMPORTANT RULES:
@@ -149,6 +163,7 @@ IMPORTANT RULES:
 5. For medical reports, summarize only the key findings.
 6. Always end with a helpful tip or reassurance.
 7. If you're unsure about medical advice, suggest consulting a doctor.
+8. Your name is Kelvin. Users activate you by saying "Hey Kelvin".
 
 You are running on a device with limited memory, so keep responses concise."""
 

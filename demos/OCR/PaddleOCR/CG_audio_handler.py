@@ -3,18 +3,22 @@
 CG_audio_handler.py - Audio Recording and Text-to-Speech Handler
 
 This module handles:
-- Recording audio from Jabra USB microphone
+- Recording audio from Jabra USB microphone (INPUT)
 - Text-to-Speech using Google Cloud TTS
 - Speech-to-Text using Google Cloud STT
-- Playing audio through Jabra or Bose speaker
+- Playing audio through Bluetooth speaker - Bose (OUTPUT)
+- Wake word detection for "Kelvin"
 
 Target Platform: RDK X5 Kit (4GB RAM, Ubuntu 22.04 ARM64)
+
+Audio Flow:
+- INPUT: Jabra USB Microphone (hw:1,0) via arecord
+- OUTPUT: Bose Bluetooth Speaker (via PulseAudio paplay)
 """
 
 import os
 import subprocess
-import threading
-import time
+import re
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -41,20 +45,58 @@ def _get_stt_client():
     return _stt_client
 
 
+# ============================================================
+# RECORDING - From Jabra USB Microphone
+# ============================================================
+def _discover_jabra_device() -> str:
+    """
+    Auto-discover Jabra USB microphone device.
+    
+    Returns:
+        ALSA device string (e.g., 'hw:1,0') or default 'hw:1,0'
+    """
+    default_device = "hw:1,0"
+    
+    try:
+        result = subprocess.run(
+            ["arecord", "-l"],
+            capture_output=True, text=True, timeout=5
+        )
+        
+        # Look for Jabra in the output
+        for line in result.stdout.split('\n'):
+            if "Jabra" in line:
+                # Extract card number: "card 1: Jabra [...]"
+                import re
+                match = re.search(r'card\s+(\d+)', line)
+                if match:
+                    card_num = match.group(1)
+                    return f"hw:{card_num},0"
+        
+        # If no Jabra found but we have cards, use card 1 (USB typically)
+        if "card 1:" in result.stdout:
+            return "hw:1,0"
+            
+    except:
+        pass
+    
+    return default_device
+
+
 def record_audio(
     output_path: str,
     duration: int = 7,
-    device: str = "hw:1,0",
+    device: Optional[str] = None,
     sample_rate: int = 16000,
     channels: int = 1
 ) -> bool:
     """
-    Record audio from Jabra microphone using arecord.
+    Record audio from Jabra USB microphone using arecord.
     
     Args:
         output_path: Path to save the WAV file
         duration: Recording duration in seconds
-        device: ALSA device (default: hw:1,0 for Jabra)
+        device: ALSA capture device (default from config: hw:1,0)
         sample_rate: Sample rate in Hz
         channels: Number of audio channels
         
@@ -62,6 +104,16 @@ def record_audio(
         True if recording successful, False otherwise
     """
     try:
+        from CG_config import JABRA_CAPTURE_DEV
+        device = device or JABRA_CAPTURE_DEV
+        
+        # Auto-discover if configured device fails
+        if device == "hw:1,0":
+            discovered = _discover_jabra_device()
+            if discovered != device:
+                device = discovered
+                print(f"[AUDIO] Using discovered microphone: {device}")
+        
         # Ensure output directory exists
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         
@@ -79,7 +131,7 @@ def record_audio(
             output_path
         ]
         
-        print(f"[AUDIO] Recording for {duration} seconds...")
+        print(f"[AUDIO] 🎤 Recording for {duration} seconds...")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 5)
         
         if result.returncode == 0 and os.path.exists(output_path):
@@ -98,39 +150,19 @@ def record_audio(
         return False
 
 
-def play_audio_jabra(audio_path: str, device: str = "plughw:1,0") -> bool:
+# ============================================================
+# PLAYBACK - Through Bluetooth Speaker (Bose) - PRIMARY OUTPUT
+# ============================================================
+def play_audio_bluetooth(audio_path: str, sink: Optional[str] = None) -> bool:
     """
-    Play audio through Jabra headset using aplay.
+    Play audio through Bluetooth speaker (Bose) using paplay.
+    
+    This is the PRIMARY output method for Care Giver.
+    Auto-discovers Bluetooth sink if configured one is not available.
     
     Args:
         audio_path: Path to WAV file
-        device: ALSA playback device
-        
-    Returns:
-        True if playback successful
-    """
-    try:
-        if not os.path.exists(audio_path):
-            print(f"[AUDIO] ❌ File not found: {audio_path}")
-            return False
-            
-        cmd = ["aplay", "-D", device, audio_path]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        
-        return result.returncode == 0
-        
-    except Exception as e:
-        print(f"[AUDIO] ❌ Playback error: {e}")
-        return False
-
-
-def play_audio_bose(audio_path: str, sink: str = None) -> bool:
-    """
-    Play audio through Bose Bluetooth speaker using paplay.
-    
-    Args:
-        audio_path: Path to WAV file
-        sink: PulseAudio sink name
+        sink: PulseAudio sink name (default from config, auto-discovers if needed)
         
     Returns:
         True if playback successful
@@ -142,30 +174,124 @@ def play_audio_bose(audio_path: str, sink: str = None) -> bool:
         if not os.path.exists(audio_path):
             print(f"[AUDIO] ❌ File not found: {audio_path}")
             return False
-            
+        
+        # Try configured sink first
         cmd = ["paplay", "-d", sink, audio_path]
+        print(f"[AUDIO] 🔊 Playing through Bluetooth speaker...")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
+        if result.returncode == 0:
+            return True
+        
+        # If configured sink failed, try to auto-discover Bluetooth sink
+        print(f"[AUDIO] ⚠️ Configured sink failed, auto-discovering Bluetooth...")
+        discovered_sink = _discover_bluetooth_sink()
+        
+        if discovered_sink and discovered_sink != sink:
+            cmd = ["paplay", "-d", discovered_sink, audio_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                print(f"[AUDIO] ✅ Using discovered sink: {discovered_sink}")
+                return True
+        
+        # Fallback to default
+        print(f"[AUDIO] ⚠️ Bluetooth playback failed, trying default...")
+        return play_audio_default(audio_path)
+        
+    except Exception as e:
+        print(f"[AUDIO] ❌ Bluetooth playback error: {e}")
+        return play_audio_default(audio_path)
+
+
+def _discover_bluetooth_sink() -> Optional[str]:
+    """
+    Auto-discover available Bluetooth audio sink.
+    
+    Returns:
+        Bluetooth sink name or None
+    """
+    try:
+        result = subprocess.run(
+            ["pactl", "list", "short", "sinks"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.split('\n'):
+            if "bluez_sink" in line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    return parts[1]
+    except:
+        pass
+    return None
+
+
+def play_audio_default(audio_path: str) -> bool:
+    """
+    Fallback: Play audio through default PulseAudio sink.
+    
+    Args:
+        audio_path: Path to WAV file
+        
+    Returns:
+        True if playback successful
+    """
+    try:
+        if not os.path.exists(audio_path):
+            return False
+        
+        cmd = ["paplay", audio_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return result.returncode == 0
+        
+    except Exception as e:
+        print(f"[AUDIO] ❌ Default playback error: {e}")
+        return False
+
+
+def play_audio_jabra(audio_path: str, device: Optional[str] = None) -> bool:
+    """
+    Play audio through Jabra headset using aplay (BACKUP option).
+    
+    Args:
+        audio_path: Path to WAV file
+        device: ALSA playback device
+        
+    Returns:
+        True if playback successful
+    """
+    try:
+        from CG_config import JABRA_PLAYBACK_DEV
+        device = device or JABRA_PLAYBACK_DEV
+        
+        if not os.path.exists(audio_path):
+            print(f"[AUDIO] ❌ File not found: {audio_path}")
+            return False
+            
+        cmd = ["aplay", "-D", device, audio_path]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
         return result.returncode == 0
         
     except Exception as e:
-        print(f"[AUDIO] ❌ Bose playback error: {e}")
+        print(f"[AUDIO] ❌ Jabra playback error: {e}")
         return False
 
 
-def play_audio(audio_path: str, use_bose: bool = False) -> bool:
+def play_audio(audio_path: str, use_bose: bool = True) -> bool:
     """
-    Play audio through available speaker.
+    Play audio through speaker.
+    
+    Default: Bluetooth speaker (Bose)
     
     Args:
         audio_path: Path to WAV file
-        use_bose: If True, use Bose Bluetooth speaker
+        use_bose: If True (default), use Bluetooth speaker
         
     Returns:
         True if playback successful
     """
     if use_bose:
-        return play_audio_bose(audio_path)
+        return play_audio_bluetooth(audio_path)
     else:
         return play_audio_jabra(audio_path)
 
@@ -197,7 +323,6 @@ def text_to_speech(
         
         # Prepare input
         synthesis_input = texttospeech.SynthesisInput(text=text)
-        
         # Configure voice
         voice = texttospeech.VoiceSelectionParams(
             language_code=language_code,
@@ -243,6 +368,8 @@ def speech_to_text(
     """
     Convert speech to text using Google Cloud STT.
     
+    Includes speech context boost for wake word "Kelvin".
+    
     Args:
         audio_path: Path to WAV audio file
         language_code: Language code
@@ -263,13 +390,19 @@ def speech_to_text(
         # Configure audio
         audio = speech.RecognitionAudio(content=audio_content)
         
-        # Configure recognition
+        # Configure recognition with speech context for wake word
         config = speech.RecognitionConfig(
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
             sample_rate_hertz=sample_rate,
             language_code=language_code,
             enable_automatic_punctuation=True,
             model="default",
+            speech_contexts=[
+                speech.SpeechContext(
+                    phrases=["Kelvin", "Hey Kelvin", "Hi Kelvin", "OK Kelvin", "Calvin", "Kevin"],
+                    boost=20.0  # Strongly boost recognition of wake word
+                )
+            ]
         )
         
         # Perform recognition
@@ -286,7 +419,7 @@ def speech_to_text(
         transcript = transcript.strip()
         
         if transcript:
-            print(f"[STT] ✅ Transcribed: '{transcript}' (confidence: {confidence:.2%})")
+            print(f"[STT] ✅ Heard: '{transcript}' (confidence: {confidence:.2%})")
         else:
             print("[STT] ⚠️ No speech detected")
         
@@ -297,13 +430,96 @@ def speech_to_text(
         return "", 0.0
 
 
-def speak(text: str, use_bose: bool = False) -> bool:
+# ============================================================
+# WAKE WORD DETECTION - "Kelvin"
+# ============================================================
+def detect_wake_word(text: str) -> Tuple[bool, str]:
     """
-    Convenience function to speak text aloud.
+    Check if text contains wake word "Kelvin" and extract the command.
+    
+    Handles variations: "Kelvin", "Hey Kelvin", "Calvin", "Kevin" (common STT misrecognitions)
+    
+    Examples:
+        "Hey Kelvin read my prescription" -> (True, "read my prescription")
+        "Kelvin take a picture" -> (True, "take a picture")
+        "Hello there" -> (False, "")
+    
+    Args:
+        text: Transcribed text from STT
+        
+    Returns:
+        Tuple of (wake_word_detected, command_text)
+    """
+    if not text:
+        return False, ""
+    
+    text_lower = text.lower().strip()
+    
+    # Wake word patterns (case-insensitive)
+    # Include common misrecognitions by speech recognition
+    wake_patterns = [
+        r'\b(?:hey\s+)?kelvin\b',
+        r'\b(?:hey\s+)?calvin\b',
+        r'\b(?:hey\s+)?kevin\b',
+        r'\b(?:hey\s+)?kelven\b',
+        r'\b(?:hi\s+)?kelvin\b',
+        r'\b(?:ok\s+)?kelvin\b',
+        r'\b(?:okay\s+)?kelvin\b',
+    ]
+    
+    for pattern in wake_patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            # Extract command after wake word
+            command = text_lower[match.end():].strip()
+            
+            # Clean up command (remove leading punctuation/filler words)
+            command = re.sub(r'^[,.\s]+', '', command)
+            command = re.sub(r'^(and|please|can you|could you|i need you to)\s+', '', command, flags=re.IGNORECASE)
+            
+            print(f"[WAKE] ✅ Wake word detected! Command: '{command}'")
+            return True, command.strip()
+    
+    return False, ""
+
+
+def listen_for_wake_word(duration: int = 5) -> Tuple[bool, str]:
+    """
+    Listen for the wake word "Kelvin" and extract the command.
+    
+    This is the main entry point for voice input. The system only
+    processes commands that start with "Kelvin" or "Hey Kelvin".
+    
+    Args:
+        duration: Recording duration in seconds
+        
+    Returns:
+        Tuple of (wake_word_detected, command_text)
+    """
+    from CG_config import TEMP_AUDIO_INPUT, JABRA_CAPTURE_DEV
+    
+    input_path = str(TEMP_AUDIO_INPUT)
+    
+    # Record audio from Jabra microphone
+    if record_audio(input_path, duration=duration, device=JABRA_CAPTURE_DEV):
+        # Transcribe
+        text, confidence = speech_to_text(input_path)
+        
+        if text:
+            # Check for wake word
+            detected, command = detect_wake_word(text)
+            return detected, command
+    
+    return False, ""
+
+
+def speak(text: str, use_bose: bool = True) -> bool:
+    """
+    Speak text aloud through Bluetooth speaker (default).
     
     Args:
         text: Text to speak
-        use_bose: If True, use Bose speaker
+        use_bose: If True (default), use Bluetooth speaker
         
     Returns:
         True if successful
@@ -314,15 +530,18 @@ def speak(text: str, use_bose: bool = False) -> bool:
     
     # Generate speech
     if text_to_speech(text, output_path):
-        # Play audio
-        return play_audio(output_path, use_bose)
+        # Play through Bluetooth speaker (default)
+        return play_audio(output_path, use_bose=use_bose)
     
     return False
 
 
 def listen(duration: int = 7) -> str:
     """
-    Convenience function to record and transcribe speech.
+    Record and transcribe speech (for follow-up, no wake word required).
+    
+    Use this ONLY for follow-up questions after wake word was already detected.
+    For initial input, use listen_for_wake_word() instead.
     
     Args:
         duration: Recording duration in seconds
@@ -334,7 +553,7 @@ def listen(duration: int = 7) -> str:
     
     input_path = str(TEMP_AUDIO_INPUT)
     
-    # Record audio
+    # Record audio from Jabra microphone
     if record_audio(input_path, duration=duration, device=JABRA_CAPTURE_DEV):
         # Transcribe
         text, _ = speech_to_text(input_path)
@@ -355,33 +574,117 @@ def cleanup_temp_audio():
 
 
 # ============================================================
+# AUDIO DEVICE CHECKS
+# ============================================================
+def check_audio_devices() -> dict:
+    """
+    Check available audio devices.
+    
+    Returns:
+        Dict with device status
+    """
+    status = {
+        "jabra_capture": False,
+        "bluetooth_sink": False,
+        "bluetooth_sink_name": None,
+    }
+    
+    # Check Jabra capture device
+    try:
+        result = subprocess.run(
+            ["arecord", "-l"],
+            capture_output=True, text=True, timeout=5
+        )
+        if "Jabra" in result.stdout or "card 1" in result.stdout:
+            status["jabra_capture"] = True
+    except:
+        pass
+    
+    # Check Bluetooth sink
+    try:
+        result = subprocess.run(
+            ["pactl", "list", "short", "sinks"],
+            capture_output=True, text=True, timeout=5
+        )
+        if "bluez_sink" in result.stdout:
+            status["bluetooth_sink"] = True
+            # Extract sink name
+            for line in result.stdout.split('\n'):
+                if "bluez_sink" in line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        status["bluetooth_sink_name"] = parts[1]
+                    break
+    except:
+        pass
+    
+    return status
+
+
+# ============================================================
 # TEST FUNCTION
 # ============================================================
 def test_audio_handler():
     """Test audio recording and playback."""
-    print("=" * 50)
-    print("🎤 Audio Handler Test")
-    print("=" * 50)
+    print("=" * 60)
+    print("🎤 Audio Handler Test - Kelvin Wake Word")
+    print("=" * 60)
     
-    # Test TTS
-    print("\n[TEST] Testing Text-to-Speech...")
+    # Check devices
+    print("\n[TEST] Checking audio devices...")
+    devices = check_audio_devices()
+    print(f"  Jabra Microphone: {'✅ Ready' if devices['jabra_capture'] else '❌ Not found'}")
+    print(f"  Bluetooth Speaker: {'✅ ' + (devices['bluetooth_sink_name'] or 'Ready') if devices['bluetooth_sink'] else '❌ Not found'}")
+    
+    # Test wake word detection patterns
+    print("\n[TEST] Testing wake word detection patterns...")
+    test_phrases = [
+        ("Hey Kelvin read my prescription", True, "read my prescription"),
+        ("Kelvin take a picture", True, "take a picture"),
+        ("Calvin help me please", True, "help me please"),
+        ("Kevin what time is it", True, "what time is it"),
+        ("Hello there", False, ""),
+        ("hey kelvin, please take a picture", True, "take a picture"),
+        ("OK Kelvin set an alarm", True, "set an alarm"),
+    ]
+    
+    all_passed = True
+    for phrase, expected_detected, expected_cmd in test_phrases:
+        detected, command = detect_wake_word(phrase)
+        passed = (detected == expected_detected)
+        status = "✅" if passed else "❌"
+        print(f"  {status} '{phrase}' -> detected={detected}, cmd='{command}'")
+        if not passed:
+            all_passed = False
+    
+    print(f"\n  Wake word tests: {'✅ ALL PASSED' if all_passed else '❌ SOME FAILED'}")
+    
+    # Test TTS + Bluetooth playback
+    print("\n[TEST] Testing Text-to-Speech + Bluetooth playback...")
     from CG_config import TEMP_DIR
     test_wav = str(TEMP_DIR / "test_tts.wav")
     
-    if text_to_speech("Hello, I am Care Giver. How are you feeling today?", test_wav):
-        print("[TEST] TTS successful, playing audio...")
-        play_audio_jabra(test_wav)
+    if text_to_speech("Hello! I am Kelvin, your healthcare assistant. Say Hey Kelvin to talk to me.", test_wav):
+        print("[TEST] TTS successful, playing through Bluetooth speaker...")
+        if play_audio_bluetooth(test_wav):
+            print("[TEST] ✅ Bluetooth playback successful")
+        else:
+            print("[TEST] ⚠️ Bluetooth playback failed, check connection")
     
-    # Test recording
-    print("\n[TEST] Testing recording (5 seconds)...")
-    record_wav = str(TEMP_DIR / "test_record.wav")
+    # Test live recording + wake word
+    print("\n[TEST] Live test: Say 'Hey Kelvin' followed by a command (5 seconds)...")
+    detected, command = listen_for_wake_word(duration=5)
     
-    if record_audio(record_wav, duration=5):
-        print("[TEST] Recording successful, transcribing...")
-        text, confidence = speech_to_text(record_wav)
-        print(f"[TEST] You said: {text}")
+    if detected:
+        print(f"[TEST] ✅ Wake word detected! Command: '{command}'")
+        speak(f"I heard your command: {command}")
+    else:
+        print("[TEST] ❌ Wake word 'Kelvin' not detected")
+        print("[TEST] Remember to say 'Hey Kelvin' before your command")
     
-    print("\n[TEST] Audio test complete!")
+    print("\n" + "=" * 60)
+    print("🎤 Audio test complete!")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

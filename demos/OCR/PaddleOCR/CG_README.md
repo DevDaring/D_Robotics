@@ -1,9 +1,10 @@
-# Care Giver - Healthcare Assistant for RDK X5
+# Kelvin - Healthcare Assistant for RDK X5
 
-An intelligent healthcare assistant designed for elderly care, featuring voice interaction, prescription OCR analysis, and medicine reminders.
+An intelligent healthcare assistant designed for elderly care, featuring wake word activation, voice interaction, prescription OCR analysis, and medicine reminders.
 
 ## 🎯 Features
 
+- **Wake Word Activation**: Say "Kelvin" to activate (e.g., "Hey Kelvin, read my prescription")
 - **Voice Conversation**: Natural voice interaction about health
 - **Prescription OCR**: Capture and read prescriptions using camera
 - **AI Analysis**: Gemini 2.5 Flash analyzes medical documents
@@ -15,7 +16,8 @@ An intelligent healthcare assistant designed for elderly care, featuring voice i
 
 - **Hardware**: RDK X5 Kit (4GB RAM)
 - **OS**: rdk-x5-ubuntu22-preinstalled-desktop-3.3.3-arm64.img.xz
-- **Audio**: Jabra USB headset (or compatible USB audio device)
+- **Audio Input**: Jabra USB Microphone (hw:1,0)
+- **Audio Output**: Bose Bluetooth Speaker (via PulseAudio)
 - **Camera**: MIPI stereo camera (built-in on RDK X5)
 
 ## 🚀 Quick Start
@@ -57,7 +59,7 @@ ros2 daemon stop
 ros2 launch mipi_cam mipi_cam_dual_channel.launch.py
 ```
 
-### 4. Run Care Giver (Terminal 2)
+### 4. Run Kelvin (Terminal 2)
 
 ```bash
 cd ~/rdk_model_zoo/demos/OCR/PaddleOCR
@@ -65,41 +67,54 @@ source ~/venv_ocr/bin/activate
 env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 Care_Giver.py
 ```
 
-## 💬 Usage
+## 🗣️ Wake Word Usage
 
-### Voice Commands
+Kelvin only responds when you say the wake word **"Kelvin"** first:
+
+| Example Phrase | What Happens |
+|----------------|--------------|
+| "Hey Kelvin, read this prescription" | ✅ Activates and processes command |
+| "Kelvin, what time is it?" | ✅ Activates and answers |
+| "Hi Kelvin, set alarm for 9 AM" | ✅ Activates and sets alarm |
+| "Read this prescription" | ❌ Ignored (no wake word) |
+
+**Note**: Text input always takes priority over voice input.
+
+## 💬 Voice Commands
+
+Once activated with "Kelvin", you can use these commands:
 
 | Command | Action |
 |---------|--------|
-| "Take picture" / "Capture" | Captures prescription image |
+| "Take picture" / "Capture" / "Read prescription" | Captures prescription image |
 | "Yes" / "Confirm" | Confirms pending action |
 | "No" / "Cancel" | Cancels pending action |
-| "Show alarms" | Lists scheduled reminders |
+| "Show alarms" / "My reminders" | Lists scheduled reminders |
 | "Exit" / "Goodbye" | Ends the conversation |
 
 ### Example Conversation
 
 ```
-🤖 Care Giver: Hello! I am Care Giver, your healthcare assistant. How are you feeling today?
+🤖 Kelvin: Hello! I'm Kelvin, your healthcare assistant. Say "Hey Kelvin" followed by your question.
 
-👤 You: I have a headache and feeling tired
+👤 You: Hey Kelvin, how are you?
 
-🤖 Care Giver: I'm sorry to hear that. Please take care and rest. Would you like to show me your prescription?
+🤖 Kelvin: I'm here and ready to help! How are you feeling today?
 
-👤 You: Take picture
+👤 You: Kelvin, I have a prescription to show you
 
-🤖 Care Giver: I'm ready to capture the image. Please confirm by saying 'yes' to proceed.
+🤖 Kelvin: I can help read your prescription. Should I capture an image now?
 
 👤 You: Yes
 
-🤖 Care Giver: Image captured successfully. Let me read the document for you.
+🤖 Kelvin: Capturing now... Image captured successfully!
              Analyzing the document...
              Your prescription includes Paracetamol 500mg twice daily after meals.
-             Would you like me to set reminders?
+             Would you like me to set reminders for these medicines?
 
 👤 You: Yes
 
-🤖 Care Giver: Alarm has been set successfully. I will remind you when it's time.
+🤖 Kelvin: Perfect! I've set reminders for your medicines. I'll notify you when it's time.
 ```
 
 ## 📁 File Structure
@@ -108,7 +123,7 @@ env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 Care_Giver.py
 demos/OCR/PaddleOCR/
 ├── Care_Giver.py          # Main application entry point
 ├── CG_config.py           # Configuration and constants
-├── CG_audio_handler.py    # Voice recording and TTS/STT
+├── CG_audio_handler.py    # Voice recording and TTS/STT (wake word detection)
 ├── CG_camera_handler.py   # Camera capture via ROS2
 ├── CG_ocr_handler.py      # PaddleOCR text extraction
 ├── CG_gemini_handler.py   # Gemini AI integration
@@ -118,7 +133,7 @@ demos/OCR/PaddleOCR/
 ├── .env                   # API keys (create from template)
 ├── .env.template          # Environment variable template
 ├── env.md                 # Environment setup guide
-└── requirements.txt       # Python dependencies
+└── CG_README.md           # This file
 ```
 
 ## 🔧 Command Line Options
@@ -130,12 +145,22 @@ python3 Care_Giver.py
 # Run with text-only input
 python3 Care_Giver.py --no-voice
 
-# Use Bose Bluetooth speaker
-python3 Care_Giver.py --bose
+# Check audio devices
+python3 Care_Giver.py --check
 
 # Run component tests
 python3 Care_Giver.py --test
 ```
+
+## 🔊 Audio Setup
+
+### Input: Jabra USB Microphone
+- Device: `hw:1,0` (ALSA)
+- Records via `arecord` command
+
+### Output: Bose Bluetooth Speaker
+- Device: `bluez_sink.78_2B_64_DD_68_CF.a2dp_sink`
+- Plays via `paplay` (PulseAudio)
 
 ## 🧠 Memory Management
 
@@ -157,14 +182,28 @@ ros2 topic list | grep image
 
 ### Audio Issues
 ```bash
-# List audio devices
+# Check audio devices
+python3 Care_Giver.py --check
+
+# List ALSA devices
 arecord -l
 aplay -l
 
-# Test Jabra recording
+# Test Jabra USB microphone recording
 arecord -D hw:1,0 -f S16_LE -r 16000 -c 1 -d 3 test.wav
-aplay -D plughw:1,0 test.wav
+
+# Test Bose Bluetooth playback
+paplay -d bluez_sink.78_2B_64_DD_68_CF.a2dp_sink test.wav
+
+# List PulseAudio sinks
+pactl list sinks short
 ```
+
+### Wake Word Not Detected
+- Speak clearly: "Hey Kelvin" or "Kelvin"
+- Ensure microphone is active (check `arecord -l`)
+- Try speaking louder or closer to microphone
+- The system also recognizes "Calvin" and "Kevin" as variations
 
 ### API Key Errors
 ```bash
