@@ -42,7 +42,9 @@ TEMP_DIR.mkdir(exist_ok=True)
 # AUDIO CONFIGURATION
 # ============================================================
 # INPUT: Jabra USB microphone (card 1, device 0)
-JABRA_CAPTURE_DEV = "hw:1,0"
+# Use 'plughw' instead of 'hw' to avoid PulseAudio conflicts
+# 'plughw' allows shared access, 'hw' requires exclusive access
+JABRA_CAPTURE_DEV = "plughw:1,0"
 JABRA_PLAYBACK_DEV = "plughw:1,0"
 
 # OUTPUT: Bose Bluetooth speaker (PRIMARY)

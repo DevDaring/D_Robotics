@@ -53,9 +53,9 @@ def _discover_jabra_device() -> str:
     Auto-discover Jabra USB microphone device.
     
     Returns:
-        ALSA device string (e.g., 'hw:1,0') or default 'hw:1,0'
+        ALSA device string (e.g., 'plughw:1,0') or default 'plughw:1,0'
     """
-    default_device = "hw:1,0"
+    default_device = "plughw:1,0"  # Use plughw instead of hw to avoid PulseAudio conflicts
     
     try:
         result = subprocess.run(
@@ -71,16 +71,35 @@ def _discover_jabra_device() -> str:
                 match = re.search(r'card\s+(\d+)', line)
                 if match:
                     card_num = match.group(1)
-                    return f"hw:{card_num},0"
+                    return f"plughw:{card_num},0"
         
         # If no Jabra found but we have cards, use card 1 (USB typically)
         if "card 1:" in result.stdout:
-            return "hw:1,0"
+            return "plughw:1,0"
             
     except:
         pass
     
     return default_device
+
+
+def _release_audio_device():
+    """
+    Release audio device by killing any processes holding it.
+    This helps avoid 'Device or resource busy' errors.
+    """
+    try:
+        # Kill any existing arecord processes
+        subprocess.run(["pkill", "-9", "arecord"], capture_output=True, timeout=2)
+    except:
+        pass
+    
+    try:
+        # Small delay to ensure device is released
+        import time
+        time.sleep(0.2)
+    except:
+        pass
 
 
 def record_audio(
@@ -93,10 +112,12 @@ def record_audio(
     """
     Record audio from Jabra USB microphone using arecord.
     
+    Uses 'plughw' instead of 'hw' to avoid PulseAudio device conflicts.
+    
     Args:
         output_path: Path to save the WAV file
         duration: Recording duration in seconds
-        device: ALSA capture device (default from config: hw:1,0)
+        device: ALSA capture device (default: plughw:1,0)
         sample_rate: Sample rate in Hz
         channels: Number of audio channels
         
@@ -105,14 +126,22 @@ def record_audio(
     """
     try:
         from CG_config import JABRA_CAPTURE_DEV
-        device = device or JABRA_CAPTURE_DEV
         
-        # Auto-discover if configured device fails
-        if device == "hw:1,0":
+        # Convert hw:X,Y to plughw:X,Y to avoid PulseAudio conflicts
+        configured_dev = device or JABRA_CAPTURE_DEV
+        if configured_dev.startswith("hw:"):
+            configured_dev = "plug" + configured_dev  # hw:1,0 -> plughw:1,0
+        device = configured_dev
+        
+        # Auto-discover if needed
+        if "1,0" in device:
             discovered = _discover_jabra_device()
-            if discovered != device:
+            if discovered and discovered != device:
                 device = discovered
                 print(f"[AUDIO] Using discovered microphone: {device}")
+        
+        # Release any held audio devices first
+        _release_audio_device()
         
         # Ensure output directory exists
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -121,26 +150,42 @@ def record_audio(
         if os.path.exists(output_path):
             os.remove(output_path)
         
-        cmd = [
-            "arecord",
-            "-D", device,
-            "-f", "S16_LE",
-            "-r", str(sample_rate),
-            "-c", str(channels),
-            "-d", str(duration),
-            output_path
-        ]
+        # Try recording with retry logic
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            # Method 1: Try arecord with plughw (preferred)
+            cmd = [
+                "arecord",
+                "-D", device,
+                "-f", "S16_LE",
+                "-r", str(sample_rate),
+                "-c", str(channels),
+                "-d", str(duration),
+                output_path
+            ]
+            
+            print(f"[AUDIO] 🎤 Recording for {duration} seconds (attempt {attempt + 1})...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 5)
+            
+            if result.returncode == 0 and os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                print(f"[AUDIO] ✅ Recorded: {output_path} ({file_size} bytes)")
+                return True
+            
+            # Check if it's a "device busy" error
+            if "busy" in result.stderr.lower() or "resource" in result.stderr.lower():
+                print(f"[AUDIO] ⚠️ Device busy, releasing and retrying...")
+                _release_audio_device()
+                import time
+                time.sleep(0.5)
+                continue
+            else:
+                print(f"[AUDIO] ❌ Recording failed: {result.stderr}")
+                break
         
-        print(f"[AUDIO] 🎤 Recording for {duration} seconds...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 5)
-        
-        if result.returncode == 0 and os.path.exists(output_path):
-            file_size = os.path.getsize(output_path)
-            print(f"[AUDIO] ✅ Recorded: {output_path} ({file_size} bytes)")
-            return True
-        else:
-            print(f"[AUDIO] ❌ Recording failed: {result.stderr}")
-            return False
+        # Method 2: Fallback to PulseAudio parecord if arecord fails
+        print("[AUDIO] ⚠️ Trying PulseAudio fallback (parecord)...")
+        return _record_audio_pulseaudio(output_path, duration, sample_rate, channels)
             
     except subprocess.TimeoutExpired:
         print("[AUDIO] ❌ Recording timed out")
@@ -148,6 +193,90 @@ def record_audio(
     except Exception as e:
         print(f"[AUDIO] ❌ Error: {e}")
         return False
+
+
+def _record_audio_pulseaudio(
+    output_path: str,
+    duration: int,
+    sample_rate: int = 16000,
+    channels: int = 1
+) -> bool:
+    """
+    Record audio using PulseAudio's parecord (fallback method).
+    
+    This works even when ALSA device is held by PulseAudio.
+    """
+    try:
+        # Find Jabra source in PulseAudio
+        source = _discover_pulseaudio_source()
+        
+        cmd = [
+            "parecord",
+            "--channels", str(channels),
+            "--rate", str(sample_rate),
+            "--format", "s16le",
+            "--file-format", "wav",
+        ]
+        
+        if source:
+            cmd.extend(["--device", source])
+        
+        cmd.append(output_path)
+        
+        print(f"[AUDIO] 🎤 Recording via PulseAudio for {duration} seconds...")
+        
+        # parecord doesn't have a duration flag, so we use timeout
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=duration + 1)
+        
+        # parecord exits when we timeout, which is expected
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            file_size = os.path.getsize(output_path)
+            print(f"[AUDIO] ✅ Recorded via PulseAudio: {output_path} ({file_size} bytes)")
+            return True
+        else:
+            print(f"[AUDIO] ❌ PulseAudio recording failed")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        # This is expected - we use timeout to stop recording
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            file_size = os.path.getsize(output_path)
+            print(f"[AUDIO] ✅ Recorded via PulseAudio: {output_path} ({file_size} bytes)")
+            return True
+        return False
+    except Exception as e:
+        print(f"[AUDIO] ❌ PulseAudio error: {e}")
+        return False
+
+
+def _discover_pulseaudio_source() -> Optional[str]:
+    """
+    Discover Jabra microphone as a PulseAudio source.
+    
+    Returns:
+        PulseAudio source name or None
+    """
+    try:
+        result = subprocess.run(
+            ["pactl", "list", "short", "sources"],
+            capture_output=True, text=True, timeout=5
+        )
+        
+        for line in result.stdout.split('\n'):
+            # Look for Jabra or USB input source
+            if "jabra" in line.lower() or ("input" in line.lower() and "usb" in line.lower()):
+                parts = line.split()
+                if len(parts) >= 2:
+                    return parts[1]
+            # Also check for alsa_input with card 1
+            if "alsa_input" in line and "card1" in line.replace(" ", "").replace("_", ""):
+                parts = line.split()
+                if len(parts) >= 2:
+                    return parts[1]
+    except:
+        pass
+    
+    return None
 
 
 # ============================================================

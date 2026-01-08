@@ -31,8 +31,27 @@ On your system, Jabra appears as `card 1, device 0` for both capture and playbac
 
 4) Test record (5 sec) + play to Jabra:
 ```bash
-arecord -D hw:1,0 -f S16_LE -r 16000 -c 1 -d 5 test.wav
+# IMPORTANT: Use 'plughw' instead of 'hw' to avoid "Device or resource busy" error
+# 'hw:1,0' requires exclusive access - PulseAudio may block it
+# 'plughw:1,0' allows shared access - works alongside PulseAudio
+
+arecord -D plughw:1,0 -f S16_LE -r 16000 -c 1 -d 5 test.wav
 aplay -D plughw:1,0 test.wav
+```
+
+**Troubleshooting "Device or resource busy" error:**
+```bash
+# 1. Check what's using the audio device
+fuser -v /dev/snd/*
+
+# 2. If PulseAudio is holding it, you have two options:
+
+# Option A: Use plughw (recommended - allows shared access)
+arecord -D plughw:1,0 -f S16_LE -r 16000 -c 1 -d 5 test.wav
+
+# Option B: Kill conflicting arecord processes
+pkill -9 arecord
+arecord -D plughw:1,0 -f S16_LE -r 16000 -c 1 -d 5 test.wav
 ```
 
 Using `plughw` for playback avoids mono-channel playback issues you already hit.[^5]
