@@ -1,7 +1,7 @@
 
 sunrise@ubuntu:~$ hostname -I
 ssh sunrise@192.168.0.117 on VS code
-
+echo $ROS_LOCALHOST_ONLY
 
 # 1) Go to the folder where the script is
 cd ~/rdk_model_zoo/demos/OCR/PaddleOCR
