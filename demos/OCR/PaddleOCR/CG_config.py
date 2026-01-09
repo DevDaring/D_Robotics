@@ -142,7 +142,11 @@ CONFIRM_KEYWORDS = ["yes", "yeah", "yep", "sure", "ok", "okay", "confirm", "do i
 DENY_KEYWORDS = ["no", "nope", "nah", "don't", "cancel", "stop", "negative"]
 
 # Keywords for setting alarms
-ALARM_KEYWORDS = ["alarm", "reminder", "remind", "schedule", "set alarm", "notify"]
+ALARM_KEYWORDS = [
+    "alarm", "reminder", "remind", "schedule", "notify",
+    "set alarm", "set reminder", "medicine time", "pill time",
+    "don't forget", "help me remember"
+]
 
 # Keywords for health queries
 HEALTH_KEYWORDS = ["health", "feeling", "pain", "ache", "symptom", "sick", "unwell", "condition"]
@@ -153,27 +157,27 @@ EXIT_KEYWORDS = ["exit", "quit", "bye", "goodbye", "stop", "end", "close"]
 # ============================================================
 # CONVERSATION PROMPTS
 # ============================================================
-GREETING_MESSAGE = "Hello! I am Kelvin, your healthcare assistant. Say Hey Kelvin followed by your question or command. How are you feeling today?"
+GREETING_MESSAGE = "Hello! I am Kelvin, your caring healthcare assistant. I'm here to help you with prescriptions and medicine reminders. Say Hey Kelvin followed by your question or command. How are you feeling today?"
 
-HEALTH_FOLLOWUP = "I understand. Can you please show me your prescription or clinical report? Say Hey Kelvin take picture when ready."
+HEALTH_FOLLOWUP = "I understand how you feel. Would you like to show me your prescription or medical report? I can help you understand it better. Say Hey Kelvin take picture when ready."
 
-PRESCRIPTION_PROMPT = "Please hold the prescription or report in front of the camera. Say Hey Kelvin take picture when you're ready."
+PRESCRIPTION_PROMPT = "Please hold the prescription or report in front of the camera. I'll read it for you and can set reminders if needed. Say Hey Kelvin take picture when you're ready."
 
 CONFIRM_CAPTURE = "I'm ready to capture the image. Say yes to proceed or no to cancel."
 
-CAPTURE_SUCCESS = "Image captured successfully. Let me read the document for you."
+CAPTURE_SUCCESS = "Got it! Let me read the document for you."
 
-OCR_ANALYZING = "Analyzing the document. Please wait a moment."
+OCR_ANALYZING = "Analyzing the document now. Just a moment please."
 
-ALARM_PROMPT = "I found medicine information in your prescription. Would you like me to set reminders for your medicines? Say yes or no."
+ALARM_PROMPT = "I found medicine information in your prescription. I can set reminders so you never miss a dose. Would you like me to do that?"
 
-ALARM_SET_SUCCESS = "Alarm has been set successfully. I will remind you when it's time to take your medicine."
+ALARM_SET_SUCCESS = "Wonderful! I've set your medicine reminders. I'll make sure to remind you at the right times. Taking care of you is what I'm here for!"
 
-FAREWELL_MESSAGE = "Take care of yourself! Remember to take your medicines on time. Goodbye!"
+FAREWELL_MESSAGE = "Take care of yourself! Remember, I'm always here when you need help with your medicines. Stay healthy and goodbye!"
 
-WAKE_WORD_HINT = "Say Hey Kelvin to talk to me."
+WAKE_WORD_HINT = "Say Hey Kelvin to talk to me. I'm here to help!"
 
-NO_WAKE_WORD_MESSAGE = "I'm listening for Hey Kelvin. Please start your command with Hey Kelvin."
+NO_WAKE_WORD_MESSAGE = "I'm listening for Hey Kelvin. Please start your command with Hey Kelvin, and I'll be happy to help!"
 
 # ============================================================
 # SYSTEM PROMPT FOR GEMINI

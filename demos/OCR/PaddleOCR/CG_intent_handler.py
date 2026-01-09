@@ -123,12 +123,31 @@ def detect_intent(text: str) -> Tuple[Intent, float]:
         if normalized == keyword or normalized.startswith(keyword + " "):
             return Intent.DENY, 0.85
     
-    # Check for alarm-related intents
+    # Check for alarm-related intents - IMPROVED DETECTION
+    alarm_set_patterns = [
+        "set alarm", "set reminder", "set a reminder", "set an alarm",
+        "remind me", "reminder for", "alarm for",
+        "add alarm", "add reminder", "create alarm", "create reminder",
+        "need reminder", "want reminder", "need alarm", "want alarm",
+        "medicine reminder", "medicine alarm",
+    ]
+    alarm_check_patterns = ["check alarm", "show alarm", "list alarm", "my alarm", "what alarm", "see alarm"]
+    
+    for pattern in alarm_check_patterns:
+        if pattern in normalized:
+            return Intent.CHECK_ALARMS, 0.9
+    
+    for pattern in alarm_set_patterns:
+        if pattern in normalized:
+            return Intent.SET_ALARM, 0.9
+    
+    # Also check for basic alarm keywords with action context
     for keyword in ALARM_KEYWORDS:
         if keyword in normalized:
-            if "check" in normalized or "show" in normalized or "list" in normalized:
+            if any(w in normalized for w in ["check", "show", "list", "see", "what", "my"]):
                 return Intent.CHECK_ALARMS, 0.85
-            return Intent.SET_ALARM, 0.85
+            if any(w in normalized for w in ["set", "add", "create", "remind", "for", "need", "want"]):
+                return Intent.SET_ALARM, 0.85
     
     # Check for greetings
     greeting_words = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening"]

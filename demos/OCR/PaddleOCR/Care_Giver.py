@@ -105,11 +105,15 @@ class CareGiver:
         self.use_voice = use_voice
         
         # Conversation state
-        self.state = "idle"  # idle, awaiting_confirmation, awaiting_response
+        self.state = "idle"  # idle, awaiting_confirmation, awaiting_response, awaiting_medicine, awaiting_timing
         self.pending_action = None
         self.last_ocr_text = None
         self.extracted_medicines = []
         self.awaiting_followup = False  # True when we expect response without wake word
+        
+        # Alarm setting state (for interactive flow)
+        self.pending_alarm_medicine = None
+        self.pending_alarm_timing = None
         
         # Start alarm monitor
         self._init_alarms()
@@ -139,13 +143,13 @@ class CareGiver:
             print(f"[INIT] ⚠️ Audio check failed: {e}")
     
     def _init_alarms(self):
-        """Initialize alarm monitoring."""
+        """Initialize alarm monitoring with caring reminders."""
         try:
-            from CG_alarm_handler import start_alarm_monitor
+            from CG_alarm_handler import start_alarm_monitor, get_caring_alarm_message
             
             def on_alarm(alarm):
-                """Callback when alarm triggers."""
-                message = f"Time to take your {alarm['medicine']}!"
+                """Callback when alarm triggers - uses caring messages."""
+                message = get_caring_alarm_message(alarm)
                 print(f"\n⏰ [ALARM] {message}")
                 self.speak(message)
             
@@ -333,6 +337,17 @@ class CareGiver:
             from CG_alarm_handler import format_alarm_list
             return format_alarm_list(), False
         
+        # SET ALARM - Interactive conversational flow
+        if intent == Intent.SET_ALARM:
+            return self._handle_set_alarm_intent(command)
+        
+        # Handle alarm follow-up states
+        if self.state == "awaiting_medicine":
+            return self._handle_medicine_input(command)
+        
+        if self.state == "awaiting_timing":
+            return self._handle_timing_input(command)
+        
         # GREETING
         if intent == Intent.GREETING:
             return "Hello! I'm Kelvin. I can help you read prescriptions and set medicine reminders. How can I help?", False
@@ -437,13 +452,18 @@ class CareGiver:
             # Build response
             response = analysis
             
-            # If medicines found, offer to set alarms
+            # If medicines found, offer to set alarms with caring tone
             if self.extracted_medicines:
                 self.pending_action = "set_alarms"
                 self.state = "awaiting_confirmation"
                 
                 med_list = ", ".join([m['medicine'] for m in self.extracted_medicines])
-                response += f"\n\nI found these medicines: {med_list}. Would you like me to set reminders?"
+                num_meds = len(self.extracted_medicines)
+                
+                if num_meds == 1:
+                    response += f"\n\nI found {med_list} in your prescription. Would you like me to set a reminder so you don't forget to take it?"
+                else:
+                    response += f"\n\nI found {num_meds} medicines: {med_list}. Would you like me to set reminders for these? I want to make sure you never miss a dose!"
                 return response, True  # Needs followup (yes/no)
             
             return response, False
@@ -454,29 +474,155 @@ class CareGiver:
     
     def _set_medicine_alarms(self) -> Tuple[str, bool]:
         """
-        Set alarms for extracted medicines.
+        Set alarms for extracted medicines from prescription.
         
         Returns:
             Tuple of (response_text, needs_followup)
         """
         if not self.extracted_medicines:
-            return "No medicines to set alarms for.", False
+            return "No medicines to set alarms for. But don't worry, you can tell me anytime! Just say 'set alarm for' followed by the medicine name.", False
         
         try:
             from CG_alarm_handler import add_alarms_from_medicines, format_alarm_list
             
-            count = add_alarms_from_medicines(self.extracted_medicines)
+            count, messages = add_alarms_from_medicines(self.extracted_medicines)
             self.extracted_medicines = []
             
             if count > 0:
-                from CG_config import ALARM_SET_SUCCESS
-                return f"{ALARM_SET_SUCCESS}\n\n{format_alarm_list()}", False
+                meds_summary = ", ".join(messages[:3])  # First 3 for brevity
+                if count > 3:
+                    meds_summary += f" and {count - 3} more"
+                
+                response = f"Perfect! I've set {count} reminder{'s' if count > 1 else ''} for you: {meds_summary}. "
+                response += "I'll make sure to remind you at the right times. Your health is my priority! 💚"
+                
+                return response, False
             else:
-                return "Couldn't set the alarms. Please try again.", False
+                return "I couldn't set the alarms. Please try again or tell me the medicine name directly.", False
                 
         except Exception as e:
             print(f"[ALARM] ❌ Error: {e}")
-            return "There was an error setting the alarms.", False
+            return "There was an error setting the alarms. But don't worry, we can try again!", False
+    
+    def _handle_set_alarm_intent(self, command: str) -> Tuple[str, bool]:
+        """
+        Handle SET_ALARM intent with interactive flow.
+        
+        Parses the command to extract medicine/timing, asks for missing info.
+        
+        Args:
+            command: User's command
+            
+        Returns:
+            Tuple of (response_text, needs_followup)
+        """
+        from CG_alarm_handler import parse_alarm_command, add_alarm, get_friendly_time, parse_time
+        
+        # Parse the command
+        parsed = parse_alarm_command(command)
+        medicine = parsed.get('medicine')
+        timing = parsed.get('timing')
+        
+        print(f"[ALARM] Parsed command - Medicine: {medicine}, Timing: {timing}")
+        
+        # If we have both, set the alarm directly
+        if medicine and timing:
+            success, message = add_alarm(medicine, timing)
+            return message, False
+        
+        # If we only have medicine, ask for timing
+        if medicine:
+            self.pending_alarm_medicine = medicine
+            self.state = "awaiting_timing"
+            return f"Got it, {medicine}! When would you like me to remind you? You can say things like 'morning', 'after breakfast', '8 AM', or 'before dinner'.", True
+        
+        # If we only have timing, ask for medicine
+        if timing:
+            self.pending_alarm_timing = timing
+            self.state = "awaiting_medicine"
+            return f"Sure, I'll set a reminder for {timing}. Which medicine is it for?", True
+        
+        # Neither provided - ask for medicine first
+        self.state = "awaiting_medicine"
+        return "I'd love to help you set a reminder! Which medicine would you like me to remind you about?", True
+    
+    def _handle_medicine_input(self, command: str) -> Tuple[str, bool]:
+        """
+        Handle medicine name input during alarm setting.
+        
+        Args:
+            command: User's response with medicine name
+            
+        Returns:
+            Tuple of (response_text, needs_followup)
+        """
+        from CG_alarm_handler import add_alarm
+        from CG_intent_handler import detect_intent, Intent
+        
+        # Check if user wants to cancel
+        intent, _ = detect_intent(command)
+        if intent == Intent.DENY or intent == Intent.EXIT:
+            self.state = "idle"
+            self.pending_alarm_medicine = None
+            self.pending_alarm_timing = None
+            return "No problem, cancelled. Just say Hey Kelvin whenever you need me!", False
+        
+        # Clean up the medicine name
+        medicine = command.strip().title()
+        
+        # Remove common prefixes
+        import re
+        medicine = re.sub(r'^(it\'?s?|the|my|for|i need|i take|i want)\s+', '', medicine, flags=re.IGNORECASE)
+        medicine = medicine.strip().title()
+        
+        # If we already have timing, set the alarm
+        if self.pending_alarm_timing:
+            timing = self.pending_alarm_timing
+            self.pending_alarm_timing = None
+            self.state = "idle"
+            
+            success, message = add_alarm(medicine, timing)
+            return message, False
+        
+        # Store medicine and ask for timing
+        self.pending_alarm_medicine = medicine
+        self.state = "awaiting_timing"
+        return f"Great, {medicine}! When should I remind you? You can say 'morning', 'evening', 'after meals', or a specific time like '8 AM'.", True
+    
+    def _handle_timing_input(self, command: str) -> Tuple[str, bool]:
+        """
+        Handle timing input during alarm setting.
+        
+        Args:
+            command: User's response with timing
+            
+        Returns:
+            Tuple of (response_text, needs_followup)
+        """
+        from CG_alarm_handler import add_alarm
+        from CG_intent_handler import detect_intent, Intent
+        
+        # Check if user wants to cancel
+        intent, _ = detect_intent(command)
+        if intent == Intent.DENY or intent == Intent.EXIT:
+            self.state = "idle"
+            self.pending_alarm_medicine = None
+            self.pending_alarm_timing = None
+            return "No problem, cancelled. Just say Hey Kelvin whenever you need me!", False
+        
+        timing = command.strip()
+        medicine = self.pending_alarm_medicine
+        
+        # Reset state
+        self.pending_alarm_medicine = None
+        self.pending_alarm_timing = None
+        self.state = "idle"
+        
+        if not medicine:
+            return "Oops, I forgot which medicine. Let's start over - just say 'set alarm for' followed by the medicine name.", False
+        
+        success, message = add_alarm(medicine, timing)
+        return message, False
     
     def run(self):
         """

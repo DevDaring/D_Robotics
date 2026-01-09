@@ -13,7 +13,7 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Tuple
 
 # Global alarm thread
 _alarm_thread = None
@@ -79,6 +79,8 @@ def parse_time(time_str: str) -> Optional[datetime]:
     - "8:00 AM", "8:00AM", "08:00 AM"
     - "20:00", "8:00"
     - "morning", "afternoon", "evening", "night"
+    - "before breakfast", "after lunch", "before dinner"
+    - "twice daily", "three times daily"
     
     Args:
         time_str: Time string
@@ -86,21 +88,53 @@ def parse_time(time_str: str) -> Optional[datetime]:
     Returns:
         datetime object or None
     """
+    if not time_str:
+        return None
+        
     time_str = time_str.strip().upper()
     now = datetime.now()
     
-    # Handle word-based times
+    # Handle word-based times - comprehensive mapping
     time_mapping = {
+        # Morning times
         'MORNING': (8, 0),
+        'EARLY MORNING': (6, 0),
         'BREAKFAST': (8, 0),
+        'BEFORE BREAKFAST': (7, 30),
+        'AFTER BREAKFAST': (9, 0),
+        'WITH BREAKFAST': (8, 0),
+        # Noon/Lunch times
+        'NOON': (12, 0),
         'LUNCH': (13, 0),
-        'AFTERNOON': (14, 0),
+        'BEFORE LUNCH': (12, 30),
+        'AFTER LUNCH': (14, 0),
+        'WITH LUNCH': (13, 0),
+        'MIDDAY': (12, 0),
+        # Afternoon times
+        'AFTERNOON': (15, 0),
+        'LATE AFTERNOON': (17, 0),
+        # Evening times
         'EVENING': (18, 0),
         'DINNER': (19, 0),
+        'BEFORE DINNER': (18, 30),
+        'AFTER DINNER': (20, 0),
+        'WITH DINNER': (19, 0),
+        'SUPPER': (19, 0),
+        # Night times
         'NIGHT': (21, 0),
         'BEDTIME': (22, 0),
+        'BEFORE BED': (22, 0),
+        'BEFORE SLEEP': (22, 0),
+        'AT NIGHT': (21, 0),
+        # Meal-related
+        'BEFORE MEAL': (8, 0),  # Default to breakfast
+        'AFTER MEAL': (9, 0),
+        'WITH MEAL': (8, 0),
+        'EMPTY STOMACH': (7, 0),
+        'ON EMPTY STOMACH': (7, 0),
     }
     
+    # Check for exact matches first
     for word, (hour, minute) in time_mapping.items():
         if word in time_str:
             return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
@@ -108,17 +142,17 @@ def parse_time(time_str: str) -> Optional[datetime]:
     # Try various time formats
     import re
     
-    # Format: "8:00 AM" or "08:00 PM"
-    match = re.search(r'(\d{1,2}):?(\d{2})?\s*(AM|PM)?', time_str)
+    # Format: "8:00 AM" or "08:00 PM" or "8 AM"
+    match = re.search(r'(\d{1,2}):?(\d{2})?\s*(AM|PM|A\.M\.|P\.M\.)?', time_str)
     
     if match:
         hour = int(match.group(1))
         minute = int(match.group(2)) if match.group(2) else 0
         period = match.group(3)
         
-        if period == 'PM' and hour != 12:
+        if period and ('PM' in period or 'P.M.' in period) and hour != 12:
             hour += 12
-        elif period == 'AM' and hour == 12:
+        elif period and ('AM' in period or 'A.M.' in period) and hour == 12:
             hour = 0
         
         return now.replace(hour=hour % 24, minute=minute, second=0, microsecond=0)
@@ -126,44 +160,96 @@ def parse_time(time_str: str) -> Optional[datetime]:
     return None
 
 
+def get_friendly_time(time_str: str) -> str:
+    """
+    Convert time to a friendly human-readable format.
+    
+    Args:
+        time_str: Time in HH:MM format
+        
+    Returns:
+        Friendly time string like "8 in the morning"
+    """
+    try:
+        time_obj = datetime.strptime(time_str, "%H:%M")
+        hour = time_obj.hour
+        minute = time_obj.minute
+        
+        # Determine period of day
+        if 5 <= hour < 12:
+            period = "in the morning"
+        elif 12 <= hour < 17:
+            period = "in the afternoon"
+        elif 17 <= hour < 21:
+            period = "in the evening"
+        else:
+            period = "at night"
+        
+        # Format time
+        if hour > 12:
+            hour_12 = hour - 12
+        elif hour == 0:
+            hour_12 = 12
+        else:
+            hour_12 = hour
+        
+        if minute == 0:
+            return f"{hour_12} o'clock {period}"
+        else:
+            return f"{hour_12}:{minute:02d} {period}"
+    except:
+        return time_str
+
+
 def add_alarm(
     medicine: str,
     timing: str,
     repeat_daily: bool = True
-) -> bool:
+) -> Tuple[bool, str]:
     """
     Add a new medicine alarm.
     
     Args:
         medicine: Medicine name
-        timing: Time string (e.g., "8:00 AM")
+        timing: Time string (e.g., "8:00 AM", "morning", "after breakfast")
         repeat_daily: If True, alarm repeats daily
         
     Returns:
-        True if alarm was added
+        Tuple of (success: bool, message: str)
     """
     alarms = load_alarms()
+    
+    # Clean up medicine name
+    medicine = medicine.strip().title()
     
     # Parse time
     alarm_time = parse_time(timing)
     if alarm_time is None:
-        print(f"[ALARM] ⚠️ Could not parse time: {timing}, using original")
-        time_str = timing
+        # Default to morning if time can't be parsed
+        alarm_time = parse_time("morning")
+        time_str = "08:00"
+        original_timing = timing or "morning"
     else:
         time_str = alarm_time.strftime("%H:%M")
+        original_timing = timing
     
     # Check for duplicates
     for alarm in alarms:
         if alarm['medicine'].lower() == medicine.lower() and alarm['time'] == time_str:
-            print(f"[ALARM] ⚠️ Alarm already exists for {medicine} at {time_str}")
-            return False
+            friendly_time = get_friendly_time(time_str)
+            msg = f"You already have a reminder for {medicine} at {friendly_time}. No worries, I'll keep reminding you!"
+            print(f"[ALARM] ⚠️ Duplicate: {medicine} at {time_str}")
+            return True, msg  # Return True since alarm exists
+    
+    # Generate unique ID
+    max_id = max([a.get('id', 0) for a in alarms], default=0)
     
     # Add new alarm
     new_alarm = {
-        'id': len(alarms) + 1,
+        'id': max_id + 1,
         'medicine': medicine,
         'time': time_str,
-        'timing_original': timing,
+        'timing_original': original_timing,
         'repeat_daily': repeat_daily,
         'enabled': True,
         'created': datetime.now().isoformat()
@@ -172,11 +258,13 @@ def add_alarm(
     alarms.append(new_alarm)
     save_alarms(alarms)
     
+    friendly_time = get_friendly_time(time_str)
+    msg = f"Done! I'll remind you to take {medicine} at {friendly_time} every day. Your health is my priority!"
     print(f"[ALARM] ✅ Added alarm: {medicine} at {time_str}")
-    return True
+    return True, msg
 
 
-def add_alarms_from_medicines(medicines: List[Dict[str, str]]) -> int:
+def add_alarms_from_medicines(medicines: List[Dict[str, str]]) -> Tuple[int, List[str]]:
     """
     Add alarms from a list of medicine dictionaries.
     
@@ -184,13 +272,59 @@ def add_alarms_from_medicines(medicines: List[Dict[str, str]]) -> int:
         medicines: List of dicts with 'medicine' and 'timing' keys
         
     Returns:
-        Number of alarms added
+        Tuple of (count of alarms added, list of summary messages)
     """
     count = 0
+    messages = []
+    
     for med in medicines:
-        if add_alarm(med['medicine'], med.get('timing', 'Morning')):
+        medicine_name = med.get('medicine', '').strip()
+        timing = med.get('timing', 'Morning')
+        
+        if not medicine_name:
+            continue
+            
+        success, msg = add_alarm(medicine_name, timing)
+        if success:
             count += 1
-    return count
+            friendly_time = get_friendly_time(parse_time(timing).strftime("%H:%M") if parse_time(timing) else "08:00")
+            messages.append(f"{medicine_name} at {friendly_time}")
+    
+    return count, messages
+
+
+def set_alarm_interactive(
+    medicine: str = None,
+    timing: str = None
+) -> Tuple[str, Optional[str], Optional[str]]:
+    """
+    Interactive alarm setting - returns what info is still needed.
+    
+    Args:
+        medicine: Medicine name (optional)
+        timing: Timing (optional)
+        
+    Returns:
+        Tuple of (response_message, missing_field, current_value)
+        missing_field is 'medicine', 'timing', or None if complete
+    """
+    if not medicine:
+        return (
+            "I'd be happy to set a reminder for you! Which medicine would you like me to remind you about?",
+            "medicine",
+            None
+        )
+    
+    if not timing:
+        return (
+            f"Got it, {medicine}. When should I remind you? You can say things like 'morning', 'after breakfast', '8 AM', or 'twice daily'.",
+            "timing",
+            medicine
+        )
+    
+    # Both provided - set the alarm
+    success, message = add_alarm(medicine, timing)
+    return (message, None, None)
 
 
 def remove_alarm(alarm_id: int) -> bool:
@@ -304,22 +438,154 @@ def check_due_alarms() -> List[Dict]:
 
 def format_alarm_list() -> str:
     """
-    Format all alarms as a readable string.
+    Format all alarms as a friendly readable string.
     
     Returns:
-        Formatted alarm list
+        Formatted alarm list with caring tone
     """
     alarms = load_alarms()
     
     if not alarms:
-        return "No alarms set."
+        return "You don't have any medicine reminders set yet. Would you like me to help you set one? Just say 'set alarm for' followed by the medicine name."
     
-    lines = ["Your medicine reminders:"]
+    lines = ["Here are your medicine reminders. I'll make sure you never miss a dose! 💊"]
+    
+    # Group by time of day for better readability
+    morning = []
+    afternoon = []
+    evening = []
+    night = []
+    
     for alarm in alarms:
-        status = "✅" if alarm.get('enabled', True) else "❌"
-        lines.append(f"  {status} {alarm['medicine']} at {alarm['time']}")
+        if not alarm.get('enabled', True):
+            continue
+        try:
+            hour = int(alarm['time'].split(':')[0])
+            friendly_time = get_friendly_time(alarm['time'])
+            entry = f"  • {alarm['medicine']} - {friendly_time}"
+            
+            if 5 <= hour < 12:
+                morning.append(entry)
+            elif 12 <= hour < 17:
+                afternoon.append(entry)
+            elif 17 <= hour < 21:
+                evening.append(entry)
+            else:
+                night.append(entry)
+        except:
+            lines.append(f"  • {alarm['medicine']} at {alarm['time']}")
     
+    if morning:
+        lines.append("\n🌅 Morning:")
+        lines.extend(morning)
+    if afternoon:
+        lines.append("\n☀️ Afternoon:")
+        lines.extend(afternoon)
+    if evening:
+        lines.append("\n🌆 Evening:")
+        lines.extend(evening)
+    if night:
+        lines.append("\n🌙 Night:")
+        lines.extend(night)
+    
+    lines.append("\nI'm here to help you stay healthy!")
     return "\n".join(lines)
+
+
+def get_caring_alarm_message(alarm: Dict) -> str:
+    """
+    Generate a caring, friendly alarm message.
+    
+    Args:
+        alarm: Alarm dictionary
+        
+    Returns:
+        Caring message string
+    """
+    medicine = alarm.get('medicine', 'your medicine')
+    
+    # Variety of caring messages
+    caring_phrases = [
+        f"Time to take your {medicine}! Your health matters to me. 💊",
+        f"Gentle reminder: It's time for {medicine}. Taking care of you is my job!",
+        f"Hey there! Don't forget your {medicine}. I'm here to keep you healthy!",
+        f"Medicine time! Please take your {medicine}. You're doing great staying on schedule!",
+        f"Reminder: {medicine} is due now. Remember, I care about your wellbeing!",
+    ]
+    
+    # Use alarm ID to pick a message (varies but consistent for same alarm)
+    idx = alarm.get('id', 0) % len(caring_phrases)
+    return caring_phrases[idx]
+
+
+def parse_alarm_command(text: str) -> Dict[str, Optional[str]]:
+    """
+    Parse a natural language alarm command to extract medicine and timing.
+    
+    Examples:
+        "set alarm for paracetamol at 8 AM" -> {'medicine': 'paracetamol', 'timing': '8 AM'}
+        "remind me to take vitamin D in the morning" -> {'medicine': 'vitamin D', 'timing': 'morning'}
+        "alarm for aspirin" -> {'medicine': 'aspirin', 'timing': None}
+    
+    Args:
+        text: Natural language command
+        
+    Returns:
+        Dict with 'medicine' and 'timing' keys (values may be None)
+    """
+    import re
+    
+    text = text.lower().strip()
+    result = {'medicine': None, 'timing': None}
+    
+    # Remove common prefixes
+    prefixes = [
+        r'^(hey kelvin,?\s*)?',
+        r'^(set\s+)?(an?\s+)?(alarm|reminder)\s+(for\s+)?',
+        r'^remind\s+me\s+(to\s+take\s+)?',
+        r'^(i\s+need\s+)?(to\s+take\s+)?',
+    ]
+    
+    cleaned = text
+    for prefix in prefixes:
+        cleaned = re.sub(prefix, '', cleaned, flags=re.IGNORECASE)
+    
+    # Common timing patterns
+    timing_patterns = [
+        r'\s+at\s+(.+)$',
+        r'\s+in\s+the\s+(morning|afternoon|evening|night)$',
+        r'\s+(morning|afternoon|evening|night|breakfast|lunch|dinner|bedtime)$',
+        r'\s+(before|after)\s+(breakfast|lunch|dinner|meal|bed|sleep)$',
+        r'\s+every\s+(morning|afternoon|evening|night|day)$',
+        r'\s+(\d{1,2}:?\d{0,2}\s*(?:am|pm)?)$',
+    ]
+    
+    # Try to extract timing
+    for pattern in timing_patterns:
+        match = re.search(pattern, cleaned, re.IGNORECASE)
+        if match:
+            result['timing'] = match.group(0).strip()
+            # Remove timing from the text to get medicine name
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE).strip()
+            break
+    
+    # Clean up remaining text as medicine name
+    # Remove filler words
+    fillers = ['my', 'the', 'a', 'an', 'some', 'please', 'for', 'to take']
+    medicine = cleaned
+    for filler in fillers:
+        medicine = re.sub(rf'\b{filler}\b', '', medicine, flags=re.IGNORECASE)
+    
+    medicine = ' '.join(medicine.split()).strip()
+    
+    if medicine:
+        result['medicine'] = medicine.title()
+    
+    # Clean up timing
+    if result['timing']:
+        result['timing'] = result['timing'].strip(' at in the').strip()
+    
+    return result
 
 
 def start_alarm_monitor(callback: Callable[[Dict], None], check_interval: int = 30):
