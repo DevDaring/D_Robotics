@@ -40,8 +40,18 @@ export ROS_LOCALHOST_ONLY=1
 ros2 daemon stop
 ros2 launch mipi_cam mipi_cam_dual_channel.launch.py
 
+#Make it permanent
+echo 'export GOOGLE_APPLICATION_CREDENTIALS="$HOME/gcp-credentials.json"' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify
+echo $GOOGLE_APPLICATION_CREDENTIALS
+cat ~/gcp-credentials.json | head -3
+
 #Step 4: Run Care Giver (Terminal 2)
 cd ~/rdk_model_zoo/demos/OCR/PaddleOCR
 source ~/venv_ocr/bin/activate
 env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 Care_Giver.py
+
+
 
