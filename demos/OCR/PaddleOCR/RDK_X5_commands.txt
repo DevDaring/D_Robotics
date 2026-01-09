@@ -20,10 +20,29 @@ env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 jabra_record_play.py
 # 5) Run Camera
 #Terminal A (camera publisher)
 
+#source /opt/tros/humble/setup.bash
+#export ROS_LOCALHOST_ONLY=1
+##ros2 daemon stop
+#ros2 launch mipi_cam mipi_cam_dual_channel.launch.py
+
+------------
+# Terminal 1 (camera over serial)
 source /opt/tros/humble/setup.bash
+
+# 1) Force ROS to localhost only (no Wi‑Fi)
 export ROS_LOCALHOST_ONLY=1
+export ROS_DOMAIN_ID=42
+
+# 2) Stop any old daemon using the network
 ros2 daemon stop
+
+# 3) Confirm environment
+echo "LOCALHOST_ONLY=$ROS_LOCALHOST_ONLY  DOMAIN_ID=$ROS_DOMAIN_ID"
+
+# 4) Launch camera
 ros2 launch mipi_cam mipi_cam_dual_channel.launch.py
+
+
 #Terminal B (snapshot)
 
 source /opt/tros/humble/setup.bash
