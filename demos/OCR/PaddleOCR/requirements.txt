@@ -100,14 +100,26 @@ wcwidth==0.2.14
 Werkzeug==3.1.4
 
 # ============================================================
-# Care Giver - Additional Dependencies
+# Care Giver (Kelvin) - Additional Dependencies
 # ============================================================
+
 # Google Generative AI (Gemini) - for AI responses
 google-generativeai>=0.3.0
 
-# Google Cloud TTS/STT - for voice input/output
+# Google Cloud TTS/STT - for voice input/output (optional - has free fallbacks)
 google-cloud-texttospeech>=2.14.0
 google-cloud-speech>=2.21.0
 
+# Free TTS/STT fallbacks (no credentials needed)
+gTTS>=2.3.0
+SpeechRecognition>=3.10.0
+
 # Environment variable loading
 python-dotenv>=1.0.0
+
+# ROS2 camera interface (for MIPI camera)
+# Note: rclpy is installed via ROS2, not pip
+# Run: source /opt/tros/humble/setup.bash
+
+# Audio dependencies (system packages, not pip)
+# Install via: sudo apt install alsa-utils pulseaudio-utils
